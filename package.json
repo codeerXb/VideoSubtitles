@@ -1,0 +1,23 @@
+{
+  "name": "video-to-doc",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @video-to-doc/api prisma:generate",
+    "db:migrate": "pnpm --filter @video-to-doc/api prisma:migrate",
+    "invite:add": "pnpm --filter @video-to-doc/api invite:add"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

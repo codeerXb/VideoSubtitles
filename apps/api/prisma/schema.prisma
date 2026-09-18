@@ -1,0 +1,188 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Platform {
+  YOUTUBE
+  BILIBILI
+}
+
+enum AcquisitionMethod {
+  CAPTION
+  TAB_AUDIO
+}
+
+enum TaskStatus {
+  CREATED
+  CAPTURING
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  CANCELED
+}
+
+enum DocumentTemplate {
+  STRUCTURED_NOTES
+  ARTICLE
+}
+
+enum OutputLanguage {
+  ZH_CN
+  SOURCE
+}
+
+enum AuthTokenKind {
+  REFRESH
+  AUTH_CODE
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  createdAt     DateTime       @default(now())
+  authTokens    AuthToken[]
+  videoSources  VideoSource[]
+  captureTasks  CaptureTask[]
+  usageEntries  UsageLedger[]
+}
+
+model Invite {
+  id         String    @id @default(uuid())
+  email      String    @unique
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model MagicLinkToken {
+  id         String    @id @default(uuid())
+  email      String
+  tokenHash  String    @unique
+  returnTo   String?
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model AuthToken {
+  id          String        @id @default(uuid())
+  userId      String
+  tokenHash   String        @unique
+  kind        AuthTokenKind
+  redirectUri String?
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, kind])
+}
+
+model VideoSource {
+  id           String        @id @default(uuid())
+  userId       String
+  platform     Platform
+  sourceId     String
+  sourceUrl    String
+  title        String
+  durationMs   Int
+  createdAt    DateTime      @default(now())
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  captureTasks CaptureTask[]
+  @@index([userId, platform, sourceId])
+}
+
+model CaptureTask {
+  id                String            @id @default(uuid())
+  userId            String
+  videoSourceId     String
+  acquisitionMethod AcquisitionMethod
+  status            TaskStatus        @default(CREATED)
+  idempotencyKey    String
+  language          String?
+  failureMessage    String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoSource       VideoSource       @relation(fields: [videoSourceId], references: [id], onDelete: Cascade)
+  audioChunks       AudioChunk[]
+  transcript        Transcript?
+  documents         Document[]
+  usageEntry        UsageLedger?
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+}
+
+model AudioChunk {
+  id            String      @id @default(uuid())
+  captureTaskId String
+  index         Int
+  objectKey     String      @unique
+  contentType   String
+  size          Int
+  uploaded      Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  captureTask   CaptureTask @relation(fields: [captureTaskId], references: [id], onDelete: Cascade)
+  @@unique([captureTaskId, index])
+}
+
+model Transcript {
+  id            String              @id @default(uuid())
+  captureTaskId String              @unique
+  language      String
+  createdAt     DateTime            @default(now())
+  captureTask   CaptureTask         @relation(fields: [captureTaskId], references: [id], onDelete: Cascade)
+  segments      TranscriptSegment[]
+}
+
+model TranscriptSegment {
+  id          String     @id @default(uuid())
+  transcriptId String
+  order       Int
+  startMs     Int
+  endMs       Int
+  text        String
+  sourceIndex Int
+  transcript  Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  @@unique([transcriptId, order])
+}
+
+model Document {
+  id             String           @id @default(uuid())
+  captureTaskId  String
+  template       DocumentTemplate
+  outputLanguage OutputLanguage
+  title          String
+  summary        String
+  payload        Json
+  userContent    String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  captureTask    CaptureTask      @relation(fields: [captureTaskId], references: [id], onDelete: Cascade)
+  revisions      DocumentRevision[]
+  @@unique([captureTaskId, template, outputLanguage])
+}
+
+model DocumentRevision {
+  id         String   @id @default(uuid())
+  documentId String
+  content    String
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model UsageLedger {
+  id            String      @id @default(uuid())
+  userId        String
+  captureTaskId String      @unique
+  durationMs    Int
+  periodKey     String
+  createdAt     DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  captureTask   CaptureTask @relation(fields: [captureTaskId], references: [id], onDelete: Cascade)
+  @@index([userId, periodKey])
+}

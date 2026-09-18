@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Video to Doc",
+  "version": "0.1.0",
+  "description": "Extract captions or record tab audio and turn videos into timestamped documents.",
+  "permissions": ["activeTab", "storage", "tabCapture", "offscreen", "scripting", "sidePanel", "identity"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://*.googlevideo.com/*",
+    "https://www.bilibili.com/*",
+    "https://*.hdslb.com/*",
+    "http://localhost:3000/*"
+  ],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "打开 Video to Doc" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "content_scripts": [{
+    "matches": ["https://www.youtube.com/*", "https://www.bilibili.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}
