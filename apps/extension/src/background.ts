@@ -1,4 +1,4 @@
-import { parseBilibiliPageData, parseBilibiliSubtitle, parseYouTubePlayerResponse, parseYouTubeTimedText } from "./adapters/parsers";
+import { normalizeYouTubePlayerResponse, parseBilibiliPageData, parseBilibiliSubtitle, parseYouTubePlayerResponse, parseYouTubeTimedText } from "./adapters/parsers";
 import type { ExtensionMessage, PageDetection, SubtitleResponse } from "./messages";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -11,30 +11,58 @@ async function activeTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+type PageSnapshot = {
+  url: string;
+  youtube?: unknown;
+  youtubeFallback?: unknown;
+  bilibiliState?: unknown;
+  bilibiliPlayInfo?: unknown;
+};
+
+async function readPageSnapshot(tabId: number): Promise<PageSnapshot> {
+  let latest: PageSnapshot = { url: "" };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const injected = (await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: () => {
+        const page = window as typeof window & {
+          ytInitialPlayerResponse?: unknown;
+          ytplayer?: { config?: { args?: { player_response?: unknown } } };
+          __INITIAL_STATE__?: unknown;
+          __playinfo__?: unknown;
+        };
+        return {
+          url: location.href,
+          youtube: page.ytInitialPlayerResponse,
+          youtubeFallback: page.ytplayer?.config?.args?.player_response,
+          bilibiliState: page.__INITIAL_STATE__,
+          bilibiliPlayInfo: page.__playinfo__,
+        };
+      },
+    }))[0]?.result as PageSnapshot | undefined;
+    if (injected) {
+      latest = injected;
+      const youtubeReady = normalizeYouTubePlayerResponse(injected.youtube) ?? normalizeYouTubePlayerResponse(injected.youtubeFallback);
+      if (youtubeReady || injected.bilibiliState) return injected;
+    }
+    if (attempt < 5) await wait(500);
+  }
+  return latest;
+}
+
 async function detectPage(): Promise<PageDetection> {
   const tab = await activeTab();
-  const injected = (await chrome.scripting.executeScript({
-    target: { tabId: tab.id! },
-    world: "MAIN",
-    func: () => {
-      const page = window as typeof window & {
-        ytInitialPlayerResponse?: unknown;
-        __INITIAL_STATE__?: unknown;
-        __playinfo__?: unknown;
-      };
-      return {
-        url: location.href,
-        youtube: page.ytInitialPlayerResponse,
-        bilibiliState: page.__INITIAL_STATE__,
-        bilibiliPlayInfo: page.__playinfo__,
-      };
-    },
-  }))[0];
-  const result = injected?.result;
+  const result = await readPageSnapshot(tab.id!);
 
   if (!result) throw new Error("无法读取视频页面信息");
   if (result.url.includes("youtube.com/")) {
-    return parseYouTubePlayerResponse(result.youtube ?? {}, result.url);
+    const response = normalizeYouTubePlayerResponse(result.youtube) ?? normalizeYouTubePlayerResponse(result.youtubeFallback);
+    return parseYouTubePlayerResponse(response ?? {}, result.url);
   }
   if (result.url.includes("bilibili.com/video/")) {
     return parseBilibiliPageData({ state: result.bilibiliState as never, playInfo: result.bilibiliPlayInfo as never }, result.url);

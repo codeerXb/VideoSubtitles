@@ -7,11 +7,20 @@ interface YouTubeCaptionTrack {
   name?: { simpleText?: string; runs?: Array<{ text?: string }> };
 }
 
-interface YouTubePlayerResponse {
+export interface YouTubePlayerResponse {
   videoDetails?: { videoId?: string; title?: string; lengthSeconds?: string };
   captions?: {
     playerCaptionsTracklistRenderer?: { captionTracks?: YouTubeCaptionTrack[] };
   };
+}
+
+export function normalizeYouTubePlayerResponse(value: unknown): YouTubePlayerResponse | null {
+  const parsed = typeof value === "string" ? (() => {
+    try { return JSON.parse(value) as unknown; } catch { return null; }
+  })() : value;
+  if (!parsed || typeof parsed !== "object") return null;
+  const response = parsed as YouTubePlayerResponse;
+  return response.videoDetails ? response : null;
 }
 
 export function parseYouTubePlayerResponse(response: YouTubePlayerResponse, sourceUrl: string): {

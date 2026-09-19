@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   parseBilibiliPageData,
   parseBilibiliSubtitle,
+  normalizeYouTubePlayerResponse,
   parseYouTubePlayerResponse,
   parseYouTubeTimedText,
 } from "../src/adapters/parsers";
 
 describe("YouTube adapter parsing", () => {
+  it("normalizes the player_response fallback when the initial global is absent", () => {
+    const response = normalizeYouTubePlayerResponse(JSON.stringify({ videoDetails: { videoId: "fallback123" } }));
+    expect(response?.videoDetails?.videoId).toBe("fallback123");
+  });
+
   it("extracts video metadata and available caption tracks", () => {
     const parsed = parseYouTubePlayerResponse({
       videoDetails: { videoId: "abc123", title: "TypeScript course", lengthSeconds: "120" },
