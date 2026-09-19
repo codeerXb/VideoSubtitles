@@ -65,6 +65,17 @@ export function parseYouTubeTimedText(payload: {
   });
 }
 
+export function buildYouTubeSubtitleRequestUrls(trackId: string): string[] {
+  const original = new URL(trackId);
+  const candidates = ["json3", "vtt"].map((format) => {
+    const candidate = new URL(original);
+    candidate.searchParams.set("fmt", format);
+    return candidate.toString();
+  });
+  candidates.push(original.toString());
+  return [...new Set(candidates)];
+}
+
 function decodeXmlText(value: string): string {
   return value
     .replace(/<br\s*\/?>/gi, "\n")

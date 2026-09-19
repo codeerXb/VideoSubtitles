@@ -1,4 +1,4 @@
-import { normalizeYouTubePlayerResponse, parseBilibiliPageData, parseBilibiliSubtitle, parseYouTubePlayerResponse, parseYouTubeSubtitleResponse } from "./adapters/parsers";
+import { buildYouTubeSubtitleRequestUrls, normalizeYouTubePlayerResponse, parseBilibiliPageData, parseBilibiliSubtitle, parseYouTubePlayerResponse, parseYouTubeSubtitleResponse } from "./adapters/parsers";
 import type { ExtensionMessage, PageDetection, SubtitleResponse } from "./messages";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -70,25 +70,68 @@ async function detectPage(): Promise<PageDetection> {
   throw new Error("当前页面不是受支持的 YouTube 或 B站视频页");
 }
 
-async function readSubtitle(platform: "YOUTUBE" | "BILIBILI", trackId: string): Promise<SubtitleResponse> {
-  const url = new URL(trackId);
-  if (platform === "YOUTUBE") url.searchParams.set("fmt", "json3");
+type SubtitleFetchResult = { ok: boolean; status: number; body: string };
+
+async function fetchSubtitleInPage(tabId: number, url: string): Promise<SubtitleFetchResult> {
+  const injected = (await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: async (subtitleUrl: string) => {
+      const response = await fetch(subtitleUrl, { credentials: "include" });
+      return { ok: response.ok, status: response.status, body: await response.text() };
+    },
+    args: [url],
+  }))[0]?.result as SubtitleFetchResult | undefined;
+  if (!injected) throw new Error("无法在视频页面读取字幕");
+  return injected;
+}
+
+async function fetchSubtitleInExtension(url: string): Promise<SubtitleFetchResult> {
   const response = await fetch(url, { credentials: "include" });
-  if (!response.ok) throw new Error(`字幕请求失败：${response.status}`);
-  const body = await response.text();
-  if (!body.trim()) throw new Error("字幕接口返回空内容，请刷新视频页面后重试");
-  let segments: SubtitleResponse["segments"];
-  if (platform === "YOUTUBE") {
-    segments = parseYouTubeSubtitleResponse(body);
-  } else {
+  return { ok: response.ok, status: response.status, body: await response.text() };
+}
+
+async function readSubtitle(platform: "YOUTUBE" | "BILIBILI", trackId: string): Promise<SubtitleResponse> {
+  const tab = await activeTab();
+  const urls = platform === "YOUTUBE" ? buildYouTubeSubtitleRequestUrls(trackId) : [new URL(trackId).toString()];
+  let lastStatus = 0;
+  let hadResponse = false;
+  let lastError: unknown;
+
+  for (const url of urls) {
+    let result: SubtitleFetchResult | undefined;
     try {
-      segments = parseBilibiliSubtitle(JSON.parse(body) as never);
-    } catch {
-      throw new Error("B站字幕接口返回格式无法识别，请刷新视频页面后重试");
+      result = await fetchSubtitleInPage(tab.id!, url);
+    } catch (error) {
+      lastError = error;
     }
+    if (!result) {
+      try {
+        result = await fetchSubtitleInExtension(url);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!result) continue;
+    hadResponse = true;
+    lastStatus = result.status;
+    if (!result.ok || !result.body.trim()) continue;
+
+    const segments = platform === "YOUTUBE"
+      ? parseYouTubeSubtitleResponse(result.body)
+      : (() => {
+        try {
+          return parseBilibiliSubtitle(JSON.parse(result.body) as never);
+        } catch {
+          return [];
+        }
+      })();
+    if (segments.length) return { segments };
   }
-  if (!segments.length) throw new Error("字幕内容为空或格式无法识别，请换一个字幕轨道重试");
-  return { segments };
+
+  if (lastStatus >= 400) throw new Error(`字幕请求失败：${lastStatus}`);
+  if (lastError && !hadResponse) throw new Error("无法读取字幕接口，请刷新视频页面后重试");
+  throw new Error("字幕接口返回空内容，请刷新视频页面后重试");
 }
 
 async function ensureOffscreenDocument(): Promise<void> {

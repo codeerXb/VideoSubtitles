@@ -6,6 +6,7 @@ import {
   parseYouTubePlayerResponse,
   parseYouTubeSubtitleResponse,
   parseYouTubeTimedText,
+  buildYouTubeSubtitleRequestUrls,
 } from "../src/adapters/parsers";
 
 describe("YouTube adapter parsing", () => {
@@ -49,6 +50,14 @@ describe("YouTube adapter parsing", () => {
   it("parses the XML fallback returned by some YouTube caption endpoints", () => {
     expect(parseYouTubeSubtitleResponse('<transcript><text start="1.5" dur="2.25">Hello &amp; world</text></transcript>')).toEqual([
       { startMs: 1_500, endMs: 3_750, text: "Hello & world", sourceIndex: 0 },
+    ]);
+  });
+
+  it("keeps the signed caption URL and provides format fallbacks", () => {
+    expect(buildYouTubeSubtitleRequestUrls("https://www.youtube.com/api/timedtext?v=abc123&sig=signed")).toEqual([
+      "https://www.youtube.com/api/timedtext?v=abc123&sig=signed&fmt=json3",
+      "https://www.youtube.com/api/timedtext?v=abc123&sig=signed&fmt=vtt",
+      "https://www.youtube.com/api/timedtext?v=abc123&sig=signed",
     ]);
   });
 });
