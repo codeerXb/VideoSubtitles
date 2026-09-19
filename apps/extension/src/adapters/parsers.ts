@@ -65,6 +65,83 @@ export function parseYouTubeTimedText(payload: {
   });
 }
 
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (entity, code: string) => {
+      const normalized = code.toLowerCase();
+      if (normalized === "amp") return "&";
+      if (normalized === "lt") return "<";
+      if (normalized === "gt") return ">";
+      if (normalized === "quot") return '"';
+      if (normalized === "apos") return "'";
+      const numeric = normalized.startsWith("#x") ? Number.parseInt(normalized.slice(2), 16) : Number.parseInt(normalized.slice(1), 10);
+      return Number.isFinite(numeric) ? String.fromCodePoint(numeric) : entity;
+    });
+}
+
+function parseCaptionTimestamp(value: string): number {
+  const parts = value.trim().split(":").map(Number);
+  if (parts.some((part) => !Number.isFinite(part))) return Number.NaN;
+  if (parts.length === 2) {
+    const minutes = parts[0] ?? Number.NaN;
+    const seconds = parts[1] ?? Number.NaN;
+    return Math.round((minutes * 60 + seconds) * 1_000);
+  }
+  if (parts.length === 3) {
+    const hours = parts[0] ?? Number.NaN;
+    const minutes = parts[1] ?? Number.NaN;
+    const seconds = parts[2] ?? Number.NaN;
+    return Math.round((hours * 3_600 + minutes * 60 + seconds) * 1_000);
+  }
+  return Number.NaN;
+}
+
+function parseYouTubeXmlCaptions(body: string): TranscriptSegment[] {
+  return [...body.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/gi)].flatMap((match, sourceIndex) => {
+    const attributes = match[1] ?? "";
+    const rawText = match[2] ?? "";
+    const start = Number(attributes.match(/\bstart\s*=\s*["']([^"']+)["']/i)?.[1]);
+    const duration = Number(attributes.match(/\bdur\s*=\s*["']([^"']+)["']/i)?.[1]);
+    const text = decodeXmlText(rawText).replace(/\s+/g, " ").trim();
+    if (!text || !Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) return [];
+    const startMs = Math.round(start * 1_000);
+    return [{ startMs, endMs: startMs + Math.round(duration * 1_000), text, sourceIndex }];
+  });
+}
+
+function parseYouTubeVttCaptions(body: string): TranscriptSegment[] {
+  const lines = body.replace(/^WEBVTT[^\n]*\n?/i, "").split(/\r?\n/);
+  const segments: TranscriptSegment[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const timing = line.match(/^\s*(\S+)\s+-->\s+(\S+)/);
+    if (!timing) continue;
+    const startMs = parseCaptionTimestamp(timing[1] ?? "");
+    const endMs = parseCaptionTimestamp(timing[2] ?? "");
+    const textLines: string[] = [];
+    for (index += 1; index < lines.length && (lines[index] ?? "").trim(); index += 1) textLines.push((lines[index] ?? "").trim());
+    const text = textLines.join(" ").replace(/\s+/g, " ").trim();
+    if (text && Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) segments.push({ startMs, endMs, text, sourceIndex: segments.length });
+  }
+  return segments;
+}
+
+export function parseYouTubeSubtitleResponse(body: string): TranscriptSegment[] {
+  const trimmed = body.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed) as { events?: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> };
+    const segments = parseYouTubeTimedText(parsed);
+    if (segments.length) return segments;
+  } catch {
+    // Some caption tracks return XML or WebVTT despite fmt=json3.
+  }
+  if (/^<\?xml|^<transcript/i.test(trimmed)) return parseYouTubeXmlCaptions(trimmed);
+  if (/^WEBVTT/i.test(trimmed)) return parseYouTubeVttCaptions(trimmed);
+  return [];
+}
+
 export function parseBilibiliSubtitle(payload: {
   body?: Array<{ from?: number; to?: number; content?: string }>;
 }): TranscriptSegment[] {

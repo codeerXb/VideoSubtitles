@@ -4,6 +4,7 @@ import {
   parseBilibiliSubtitle,
   normalizeYouTubePlayerResponse,
   parseYouTubePlayerResponse,
+  parseYouTubeSubtitleResponse,
   parseYouTubeTimedText,
 } from "../src/adapters/parsers";
 
@@ -43,6 +44,12 @@ describe("YouTube adapter parsing", () => {
       { tStartMs: 0, dDurationMs: 1_200, segs: [{ utf8: "Hello " }, { utf8: "world" }] },
       { tStartMs: 1_200, dDurationMs: 300, segs: [{ utf8: "\n" }] },
     ] })).toEqual([{ startMs: 0, endMs: 1_200, text: "Hello world", sourceIndex: 0 }]);
+  });
+
+  it("parses the XML fallback returned by some YouTube caption endpoints", () => {
+    expect(parseYouTubeSubtitleResponse('<transcript><text start="1.5" dur="2.25">Hello &amp; world</text></transcript>')).toEqual([
+      { startMs: 1_500, endMs: 3_750, text: "Hello & world", sourceIndex: 0 },
+    ]);
   });
 });
 
